@@ -1,0 +1,213 @@
+{
+  "info": {
+    "name": "RAG Learning Lab — Local API",
+    "description": "Local FastAPI backend. No authentication header is required. Start the backend using the RAG Backend (local) PyCharm configuration. base_url defaults to http://127.0.0.1:8000. Import this JSON into Postman; no separate environment is required. Send Health, select a file and Upload, then List, Search and Chat. Delete is optional cleanup and removes stored data. For Collection Runner, select the upload file first and deselect Delete if you want to keep it. OPENAI_API_KEY belongs in the backend root .env, never in Postman; restart the backend after changing it. A 503 may indicate missing/invalid upstream configuration; inspect the error.code and error.message response. While PyCharm is paused at a breakpoint, requests wait until Resume.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "noauth"
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://127.0.0.1:8000",
+      "type": "string",
+      "description": "Backend address, without trailing slash."
+    },
+    {
+      "key": "document_id",
+      "value": "",
+      "type": "string",
+      "description": "Saved automatically after upload. Used by Delete; can also scope Search/Chat."
+    }
+  ],
+  "item": [
+    {
+      "name": "01 — Health check",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": "{{base_url}}/health",
+        "description": "Checks PostgreSQL and reports indexed chunks. No OpenAI call."
+      },
+      "response": [],
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 200\", function () { pm.response.to.have.status(200); });",
+              "if (pm.response.code === 200) {",
+              "  pm.test(\"Backend is healthy\", function () { pm.expect(pm.response.json().status).to.eql(\"ok\"); });",
+              "}"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "02 — Upload PDF, DOCX or TXT",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "url": "{{base_url}}/api/documents/upload",
+        "description": "In Body → form-data, select a local file for the file field (for example samples/permit.txt). PDF must contain extractable text; TXT must be UTF-8. Default upload limit: 20 MB. Do not manually add Content-Type: Postman supplies the multipart boundary. Requires the backend OPENAI_API_KEY for embeddings. A successful upload saves its ID to the collection variable document_id.",
+        "body": {
+          "mode": "formdata",
+          "formdata": [
+            {
+              "key": "file",
+              "type": "file",
+              "src": [],
+              "description": "Choose a local PDF, DOCX or TXT file."
+            }
+          ]
+        }
+      },
+      "response": [],
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 201\", function () { pm.response.to.have.status(201); });",
+              "if (pm.response.code === 201) {",
+              "  const document = pm.response.json();",
+              "  pm.test(\"Document has an ID\", function () { pm.expect(document.id).to.be.a(\"number\").and.above(0); });",
+              "  pm.collectionVariables.set(\"document_id\", String(document.id));",
+              "}"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "03 — List documents",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": "{{base_url}}/api/documents",
+        "description": "Returns uploaded document IDs and metadata. No OpenAI call."
+      },
+      "response": [],
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 200\", function () { pm.response.to.have.status(200); });",
+              "if (pm.response.code === 200) {",
+              "  pm.test(\"Documents are a list\", function () { pm.expect(pm.response.json()).to.be.an(\"array\"); });",
+              "}"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "04 — Search document passages",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{base_url}}/api/search",
+        "description": "Semantic retrieval without generating an answer. Upload a document first. document_ids: null searches all documents; use [{{document_id}}] to search the last upload, or [] to select none. top_k accepts 1–20. Requires backend embeddings credentials when searching indexed documents.",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"query\": \"When does inspection need to happen?\",\n  \"document_ids\": null,\n  \"top_k\": 5\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "response": [],
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 200\", function () { pm.response.to.have.status(200); });",
+              "if (pm.response.code === 200) {",
+              "  pm.test(\"Retrieval results are a list\", function () { pm.expect(pm.response.json().results).to.be.an(\"array\"); });",
+              "}"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "05 — Ask a grounded question",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{base_url}}/api/chat/query",
+        "description": "Retrieves passages and generates an answer with sources. Upload a document first. document_ids: null searches all documents; use [{{document_id}}] to use the last upload, or [] to select none. Requires backend OpenAI credentials. Each question is independent; no conversation history is sent.",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"question\": \"When does inspection need to happen?\",\n  \"document_ids\": null,\n  \"top_k\": 5\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "response": [],
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 200\", function () { pm.response.to.have.status(200); });",
+              "if (pm.response.code === 200) {",
+              "  const answer = pm.response.json();",
+              "  pm.test(\"Answer and sources are present\", function () {",
+              "    pm.expect(answer.answer).to.be.a(\"string\");",
+              "    pm.expect(answer.sources).to.be.an(\"array\");",
+              "  });",
+              "}"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "06 — Delete document (optional cleanup)",
+      "request": {
+        "method": "DELETE",
+        "header": [],
+        "url": "{{base_url}}/api/documents/{{document_id}}",
+        "description": "Deletes the document metadata, chunks and vectors. document_id is set by a successful upload; alternatively set it manually from List documents. This request changes stored data. Send only when you want to remove that document; deselect it in Collection Runner if you want to keep the upload."
+      },
+      "response": [],
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 204\", function () { pm.response.to.have.status(204); });",
+              "if (pm.response.code === 204) { pm.collectionVariables.set(\"document_id\", \"\"); }"
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}
